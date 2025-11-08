@@ -109,6 +109,229 @@
     </div>
 
     <script>
+        // Vercel API Route URL - FIXED
+        const API_URL = "/api/generate-seo";
+        
+        const FREE_MODELS = [
+            "deepseek/deepseek-r1",
+            "mistralai/mixtral-8x7b-instruct", 
+            "meta-llama/llama-3-8b-instruct"
+        ];
+        
+        // DOM Elements
+        const form = document.getElementById('optimizerForm');
+        const promptInput = document.getElementById('prompt');
+        const generateButton = document.getElementById('generateButton');
+        const buttonText = document.getElementById('buttonText');
+        const processingIndicator = document.getElementById('processingIndicator');
+        const loadingText = document.getElementById('loadingText');
+        const statusMessage = document.getElementById('statusMessage');
+        const resultsDiv = document.getElementById('results');
+
+        // Utility Functions
+        function setAppState(isLoading, message = '') {
+            generateButton.disabled = isLoading;
+            processingIndicator.classList.toggle('hidden', !isLoading);
+            
+            if (isLoading) {
+                loadingText.textContent = message || "Processing...";
+                buttonText.innerHTML = '<svg class="animate-spin h-4 w-4 mr-2 inline-block" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Generating...';
+            } else {
+                buttonText.textContent = 'Generate YouTube SEO Content';
+            }
+        }
+
+        // Vercel API Call
+        async function callVercelAPI(model, prompt, language, retryCount = 0) {
+            const payload = {
+                model: model,
+                prompt: prompt,
+                language: language
+            };
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API Error: ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    return {
+                        model: model,
+                        content: data.content
+                    };
+                } else {
+                    throw new Error(data.error || 'API call failed');
+                }
+
+            } catch (error) {
+                console.error('Vercel API failed:', error);
+                if (retryCount < 2) {
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    return callVercelAPI(model, prompt, language, retryCount + 1);
+                }
+                throw error;
+            }
+        }
+
+        // Main Function
+        async function generateResponse(e) {
+            e.preventDefault();
+            resultsDiv.innerHTML = '';
+            statusMessage.classList.add('hidden');
+            
+            const userPrompt = promptInput.value.trim();
+            const selectedModel = document.getElementById('modelSelect').value;
+            const selectedLanguage = document.getElementById('languageSelect').value;
+
+            if (!userPrompt) {
+                statusMessage.textContent = "Please enter your Video Topic/Title.";
+                statusMessage.classList.remove('hidden');
+                return;
+            }
+
+            setAppState(true, `Generating content in ${selectedLanguage}...`);
+
+            try {
+                let finalResult = null;
+                let modelsToTry = selectedModel === 'auto' ? FREE_MODELS : [selectedModel];
+
+                for (const model of modelsToTry) {
+                    loadingText.textContent = `Trying ${model.split('/')[1] || model}...`;
+                    
+                    try {
+                        finalResult = await callVercelAPI(model, userPrompt, selectedLanguage);
+                        if (finalResult) break;
+                    } catch (error) {
+                        console.error(`Model ${model} failed:`, error);
+                        continue;
+                    }
+                }
+
+                if (!finalResult) {
+                    const fallbackData = createFallbackResponse(userPrompt, selectedLanguage);
+                    displayResults(fallbackData, 'Fallback Generator');
+                    return;
+                }
+
+                let jsonContent;
+                try {
+                    let cleanContent = finalResult.content.replace(/```json\s*|\s*```/g, '').trim();
+                    jsonContent = JSON.parse(cleanContent);
+                } catch (parseError) {
+                    jsonContent = createFallbackResponse(userPrompt, selectedLanguage);
+                }
+
+                displayResults(jsonContent, finalResult.model);
+
+            } catch (error) {
+                console.error('Error:', error);
+                statusMessage.textContent = "Error: " + error.message;
+                statusMessage.classList.remove('hidden');
+                
+                const fallbackData = createFallbackResponse(userPrompt, selectedLanguage);
+                displayResults(fallbackData, 'Fallback Generator');
+            } finally {
+                setAppState(false);
+            }
+        }
+
+        // Fallback content generator
+        function createFallbackResponse(prompt, language) {
+            if (language === 'Hindi') {
+                return {
+                    seo_titles: `${prompt} - पूरी जानकारी, ${prompt} सीखें हिंदी में, ${prompt} ट्यूटोरियल`,
+                    description: `इस वीडियो में हम ${prompt} के बारे में पूरी जानकारी देंगे। स्टेप बाय स्टेप सीखें और प्रोफेशनल टिप्स जानें।\n\nवीडियो पसंद आए तो LIKE 👍 करें और CHANNEL SUBSCRIBE 🔔 करें!\n\n#${prompt.replace(/\s+/g, '')} #ट्यूटोरियल #हिंदी`,
+                    hashtags: `#${prompt.replace(/\s+/g, '')}, #YouTube, #ट्यूटोरियल, #हिंदी`,
+                    keywords: `${prompt}, हिंदी ट्यूटोरियल, सीखें, गाइड, टिप्स`
+                };
+            }
+            
+            return {
+                seo_titles: `${prompt} - Complete Guide, How to ${prompt} - Step by Step, ${prompt} Tutorial`,
+                description: `In this video, we cover everything about ${prompt}. Learn professional techniques and best practices.\n\nDon't forget to LIKE 👍 and SUBSCRIBE 🔔!\n\n#${prompt.replace(/\s+/g, '')} #Tutorial #HowTo`,
+                hashtags: `#${prompt.replace(/\s+/g, '')}, #YouTube, #Tutorial, #HowTo`,
+                keywords: `${prompt}, tutorial, how to, guide, tips`
+            };
+        }
+
+        function displayResults(data, modelUsed) {
+            const seoTitles = data.seo_titles || 'No titles generated';
+            const description = data.description || 'No description generated';
+            const hashtags = data.hashtags || 'No hashtags generated';
+            const keywords = data.keywords || 'No keywords generated';
+
+            const outputHTML = `
+                <div class="bg-gray-50 dark:bg-gray-800 p-6 rounded-2xl border-2 border-green-500">
+                    <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-4 text-center">✅ YouTube SEO Content Generated!</h2>
+                    
+                    <div class="mb-6 p-4 bg-white dark:bg-dark-card rounded-xl">
+                        <h3 class="font-bold text-lg text-blue-600 dark:text-blue-400 mb-3">✨ SEO Title Suggestions</h3>
+                        <div class="flex flex-wrap gap-2">
+                            ${seoTitles.split(',').map(title => 
+                                `<span class="inline-block bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-sm px-3 py-1 rounded-lg">${title.trim()}</span>`
+                            ).join('')}
+                        </div>
+                    </div>
+                    
+                    <div class="mb-6 p-4 bg-white dark:bg-dark-card rounded-xl">
+                        <h3 class="font-bold text-lg text-green-600 dark:text-green-400 mb-3">📝 Video Description</h3>
+                        <div class="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                            <p class="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">${description}</p>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-6 p-4 bg-white dark:bg-dark-card rounded-xl">
+                        <h3 class="font-bold text-lg text-purple-600 dark:text-purple-400 mb-3">🏷️ Keywords & Tags</h3>
+                        <div class="flex flex-wrap gap-2">
+                            ${keywords.split(',').map(keyword => 
+                                `<span class="inline-block bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 text-sm px-3 py-1 rounded-lg">${keyword.trim()}</span>`
+                            ).join('')}
+                        </div>
+                    </div>
+                    
+                    <div class="p-4 bg-white dark:bg-dark-card rounded-xl">
+                        <h3 class="font-bold text-lg text-pink-600 dark:text-pink-400 mb-3">#️⃣ Hashtags</h3>
+                        <div class="flex flex-wrap gap-2">
+                            ${hashtags.split(',').map(hashtag => 
+                                `<span class="inline-block bg-pink-100 dark:bg-pink-900 text-pink-800 dark:text-pink-200 text-sm px-3 py-1 rounded-lg">${hashtag.trim()}</span>`
+                            ).join('')}
+                        </div>
+                    </div>
+                    
+                    <div class="mt-6 p-4 bg-yellow-50 dark:bg-yellow-900 rounded-xl text-center">
+                        <p class="text-sm text-yellow-800 dark:text-yellow-200">
+                            *AI-Generated Content - Please review before use<br>
+                            <span class="font-mono">Model: ${modelUsed}</span>
+                        </p>
+                    </div>
+                </div>
+            `;
+            
+            resultsDiv.innerHTML = outputHTML;
+        }
+
+        // Event Listeners
+        form.addEventListener('submit', generateResponse);
+
+        console.log('YouTube SEO Master - Vercel Version Loaded');
+    </script>
+</body>
+</html>        <div class="ad-banner">
+            YouTube SEO Master - Free AI Tool
+        </div>
+    </div>
+
+    <script>
         // Vercel API Route URL - YAHAN CHANGE KARNA HAI
         const API_URL = "/api/generate-seo";
         
